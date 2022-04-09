@@ -103,6 +103,83 @@ func DeleteUser(u *user_model.User) error {
 	return nil
 }
 
+// FullDeleteUser completely and permanently deletes everything of a user,
+// but issues/comments/pulls will be kept and shown as someone has been deleted,
+// unless the user is younger than USER_DELETE_WITH_COMMENTS_MAX_DAYS.
+func FullDeleteUser(u *user_model.User) error {
+	if u.IsOrganization() {
+		return fmt.Errorf("%s is an organization not a user", u.Name)
+	}
+
+	ctx, committer, err := db.TxContext()
+	if err != nil {
+		return err
+	}
+	defer committer.Close()
+
+	// Note: A user owns any repository or belongs to any organization
+	//	cannot perform delete operation.
+
+	// Check ownership of repository.
+	count, err := repo_model.GetRepositoryCount(ctx, u.ID)
+	if err != nil {
+		return fmt.Errorf("GetRepositoryCount: %v", err)
+	} else if count > 0 {
+		return models.ErrUserOwnRepos{UID: u.ID}
+	}
+
+	// Check membership of organization.
+	count, err = organization.GetOrganizationCount(ctx, u)
+	if err != nil {
+		return fmt.Errorf("GetOrganizationCount: %v", err)
+	} else if count > 0 {
+		return models.ErrUserHasOrgs{UID: u.ID}
+	}
+
+	// Check ownership of packages.
+	if ownsPackages, err := packages_model.HasOwnerPackages(ctx, u.ID); err != nil {
+		return fmt.Errorf("HasOwnerPackages: %v", err)
+	} else if ownsPackages {
+		return models.ErrUserOwnPackages{UID: u.ID}
+	}
+
+	if err := models.FullDeleteUser(ctx, u); err != nil {
+		return fmt.Errorf("FullDeleteUser: %v", err)
+	}
+
+	if err := committer.Commit(); err != nil {
+		return err
+	}
+	committer.Close()
+
+	if err = asymkey_model.RewriteAllPublicKeys(); err != nil {
+		return err
+	}
+	if err = asymkey_model.RewriteAllPrincipalKeys(); err != nil {
+		return err
+	}
+
+	// Note: There are something just cannot be roll back,
+	//	so just keep error logs of those operations.
+	path := user_model.UserPath(u.Name)
+	if err := util.RemoveAll(path); err != nil {
+		err = fmt.Errorf("Failed to RemoveAll %s: %v", path, err)
+		_ = admin_model.CreateNotice(ctx, admin_model.NoticeTask, fmt.Sprintf("delete user '%s': %v", u.Name, err))
+		return err
+	}
+
+	if u.Avatar != "" {
+		avatarPath := u.CustomAvatarRelativePath()
+		if err := storage.Avatars.Delete(avatarPath); err != nil {
+			err = fmt.Errorf("Failed to remove %s: %v", avatarPath, err)
+			_ = admin_model.CreateNotice(ctx, admin_model.NoticeTask, fmt.Sprintf("delete user '%s': %v", u.Name, err))
+			return err
+		}
+	}
+
+	return nil
+}
+
 // DeleteInactiveUsers deletes all inactive users and email addresses.
 func DeleteInactiveUsers(ctx context.Context, olderThan time.Duration) error {
 	users, err := user_model.GetInactiveUsers(ctx, olderThan)

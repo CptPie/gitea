@@ -442,6 +442,43 @@ func DeleteUser(ctx *context.Context) {
 	})
 }
 
+func FullDeleteUser(ctx *context.Context) {
+	u, err := user_model.GetUserByID(ctx.ParamsInt64(":userid"))
+	if err != nil {
+		ctx.ServerError("GetUserByID", err)
+		return
+	}
+
+	if err = user_service.FullDeleteUser(u); err != nil {
+		switch {
+		case models.IsErrUserOwnRepos(err):
+			ctx.Flash.Error(ctx.Tr("admin.users.still_own_repo"))
+			ctx.JSON(http.StatusOK, map[string]interface{}{
+				"redirect": setting.AppSubURL + "/admin/users/" + url.PathEscape(ctx.Params(":userid")),
+			})
+		case models.IsErrUserHasOrgs(err):
+			ctx.Flash.Error(ctx.Tr("admin.users.still_has_org"))
+			ctx.JSON(http.StatusOK, map[string]interface{}{
+				"redirect": setting.AppSubURL + "/admin/users/" + url.PathEscape(ctx.Params(":userid")),
+			})
+		case models.IsErrUserOwnPackages(err):
+			ctx.Flash.Error(ctx.Tr("admin.users.still_own_packages"))
+			ctx.JSON(http.StatusOK, map[string]interface{}{
+				"redirect": setting.AppSubURL + "/admin/users/" + ctx.Params(":userid"),
+			})
+		default:
+			ctx.ServerError("FullDeleteUser", err)
+		}
+		return
+	}
+	log.Trace("Account fully deleted by admin (%s): %s", ctx.Doer.Name, u.Name)
+
+	ctx.Flash.Success(ctx.Tr("admin.users.deletion_success"))
+	ctx.JSON(http.StatusOK, map[string]interface{}{
+		"redirect": setting.AppSubURL + "/admin/users",
+	})
+}
+
 // AvatarPost response for change user's avatar request
 func AvatarPost(ctx *context.Context) {
 	u := prepareUserInfo(ctx)

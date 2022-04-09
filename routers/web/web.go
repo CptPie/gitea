@@ -474,6 +474,7 @@ func RegisterRoutes(m *web.Route) {
 			m.Combo("/new").Get(admin.NewUser).Post(bindIgnErr(forms.AdminCreateUserForm{}), admin.NewUserPost)
 			m.Combo("/{userid}").Get(admin.EditUser).Post(bindIgnErr(forms.AdminEditUserForm{}), admin.EditUserPost)
 			m.Post("/{userid}/delete", admin.DeleteUser)
+			m.Post("/{userid}/full_delete", admin.FullDeleteUser)
 			m.Post("/{userid}/avatar", bindIgnErr(forms.AvatarForm{}), admin.AvatarPost)
 			m.Post("/{userid}/avatar/delete", admin.DeleteAvatar)
 		})
