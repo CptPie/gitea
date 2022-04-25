@@ -263,6 +263,42 @@ func DeleteAccount(ctx *context.Context) {
 	}
 }
 
+// AnonDeleteAccount render user suicide page and response for delete user himself
+func AnonDeleteAccount(ctx *context.Context) {
+	ctx.Data["Title"] = ctx.Tr("settings")
+	ctx.Data["PageIsSettingsAccount"] = true
+
+	if _, _, err := auth.UserSignIn(ctx.Doer.Name, ctx.FormString("password")); err != nil {
+		if user_model.IsErrUserNotExist(err) {
+			loadAccountData(ctx)
+
+			ctx.RenderWithErr(ctx.Tr("form.enterred_invalid_password"), tplSettingsAccount, nil)
+		} else {
+			ctx.ServerError("UserSignIn", err)
+		}
+		return
+	}
+
+	if err := user.FullDeleteUser(ctx.Doer); err != nil {
+		switch {
+		case models.IsErrUserOwnRepos(err):
+			ctx.Flash.Error(ctx.Tr("form.still_own_repo"))
+			ctx.Redirect(setting.AppSubURL + "/user/settings/account")
+		case models.IsErrUserHasOrgs(err):
+			ctx.Flash.Error(ctx.Tr("form.still_has_org"))
+			ctx.Redirect(setting.AppSubURL + "/user/settings/account")
+		case models.IsErrUserOwnPackages(err):
+			ctx.Flash.Error(ctx.Tr("form.still_own_packages"))
+			ctx.Redirect(setting.AppSubURL + "/user/settings/account")
+		default:
+			ctx.ServerError("DeleteUser", err)
+		}
+	} else {
+		log.Trace("Account deleted: %s", ctx.Doer.Name)
+		ctx.Redirect(setting.AppSubURL + "/")
+	}
+}
+
 func loadAccountData(ctx *context.Context) {
 	emlist, err := user_model.GetEmailAddresses(ctx.Doer.ID)
 	if err != nil {
